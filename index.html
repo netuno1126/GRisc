@@ -241,6 +241,14 @@ const authArea = document.getElementById('authArea');
 const navButtons = document.querySelectorAll('.nav-item');
 
 let session = null;
+let currentRole = null; // 'leitor' | 'editor' | 'admin' | null
+
+async function loadRole(){
+  if(!session){ currentRole = null; return; }
+  const { data, error } = await sb.from('perfis').select('papel').eq('id', session.user.id).single();
+  currentRole = (!error && data) ? data.papel : 'leitor';
+}
+function canWrite(){ return currentRole === 'editor' || currentRole === 'admin'; }
 
 function esc(s){
   if(s === null || s === undefined) return '';
@@ -250,9 +258,10 @@ function closeModal(){ modalRoot.innerHTML = ''; }
 
 function renderAuthArea(){
   if(session){
+    const roleLabel = currentRole ? currentRole.toUpperCase() : '…';
     authArea.innerHTML = `
       <div style="display:flex; align-items:center; gap:10px;">
-        <span style="font-family:var(--font-mono); font-size:11.5px; color:var(--brass-bright);">${esc(session.user.email)}</span>
+        <span style="font-family:var(--font-mono); font-size:11.5px; color:var(--brass-bright);">${esc(session.user.email)} <span style="color:var(--sand-dim);">(${esc(roleLabel)})</span></span>
         <button class="btn small" id="logoutBtn">Sair</button>
       </div>`;
     document.getElementById('logoutBtn').onclick = async () => { await sb.auth.signOut(); };
@@ -317,8 +326,9 @@ function renderAuthForm(mode){
   };
 }
 
-sb.auth.onAuthStateChange((_event, s) => {
+sb.auth.onAuthStateChange(async (_event, s) => {
   session = s;
+  await loadRole();
   renderAuthArea();
   if(currentTable) loadTableData();
 });
@@ -399,7 +409,7 @@ async function renderTable(table, label){
         <div class="title">Registros</div>
         <div class="panel-head-right">
           <input type="search" id="searchBox" placeholder="Buscar…" />
-          <button class="btn primary" id="addRowBtn" ${session ? '' : 'disabled title="Faça login para inserir"'}>+ Novo registro</button>
+          <button class="btn primary" id="addRowBtn" ${canWrite() ? '' : 'disabled title="Requer papel editor ou admin"'}>+ Novo registro</button>
         </div>
       </div>
       <div class="table-scroll" id="tableScroll"><div class="loading">Carregando…</div></div>
@@ -424,7 +434,7 @@ async function loadTableData(){
   const scroll = document.getElementById('tableScroll');
   const pagerInfo = document.getElementById('pagerInfo');
   const addBtn = document.getElementById('addRowBtn');
-  if(addBtn) addBtn.disabled = !session;
+  if(addBtn) addBtn.disabled = !canWrite();
   scroll.innerHTML = `<div class="loading">Carregando…</div>`;
 
   if(!currentColumns) currentColumns = await getColumns(currentTable);
@@ -441,7 +451,7 @@ async function loadTableData(){
     return;
   }
   if(!data || data.length === 0){
-    scroll.innerHTML = `<div class="empty-state">Nenhum registro nesta tabela ainda. ${session ? 'Clique em "Novo registro" para adicionar o primeiro.' : 'Faça login para começar a cadastrar.'}</div>`;
+    scroll.innerHTML = `<div class="empty-state">Nenhum registro nesta tabela ainda. ${canWrite() ? 'Clique em "Novo registro" para adicionar o primeiro.' : 'É necessário papel editor ou admin para cadastrar.'}</div>`;
     pagerInfo.textContent = `0 registros`;
     document.getElementById('prevPage').disabled = true;
     document.getElementById('nextPage').disabled = true;
@@ -459,19 +469,19 @@ async function loadTableData(){
 
   scroll.innerHTML = `
     <table>
-      <thead><tr>${cols.map(c=>`<th>${esc(c)}</th>`).join('')}${session ? '<th>Ações</th>' : ''}</tr></thead>
+      <thead><tr>${cols.map(c=>`<th>${esc(c)}</th>`).join('')}${canWrite() ? '<th>Ações</th>' : ''}</tr></thead>
       <tbody>
         ${rows.map((row, idx) => `<tr data-idx="${idx}">${cols.map(c => {
           const v = row[c];
           if(v === null || v === undefined || v === '') return `<td class="null">—</td>`;
           return `<td>${esc(v)}</td>`;
         }).join('')}
-        ${session ? `<td class="actions"><button class="btn small" data-edit="${idx}">Editar</button><button class="btn small danger" data-del="${idx}">Excluir</button></td>` : ''}</tr>`).join('')}
+        ${canWrite() ? `<td class="actions"><button class="btn small" data-edit="${idx}">Editar</button><button class="btn small danger" data-del="${idx}">Excluir</button></td>` : ''}</tr>`).join('')}
       </tbody>
     </table>
   `;
 
-  if(session){
+  if(canWrite()){
     scroll.querySelectorAll('[data-edit]').forEach(b => { b.onclick = () => openRowModal('update', rows[parseInt(b.dataset.edit)]); });
     scroll.querySelectorAll('[data-del]').forEach(b => { b.onclick = () => confirmDelete(rows[parseInt(b.dataset.del)], pkCol); });
   }
